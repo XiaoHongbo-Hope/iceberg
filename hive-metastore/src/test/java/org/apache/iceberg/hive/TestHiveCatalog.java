@@ -81,6 +81,7 @@ import org.apache.iceberg.transforms.Transforms;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.JsonUtil;
 import org.apache.thrift.TException;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -165,6 +166,12 @@ public class TestHiveCatalog extends CatalogTests<HiveCatalog> {
         required(2, "data", Types.StringType.get()));
   }
 
+  private Schema getUpperCaseTestSchema() {
+    return new Schema(
+            required(1, "ID", Types.IntegerType.get(), "unique ID"),
+            required(2, "data", Types.StringType.get()));
+  }
+
   @Test
   public void testInvalidIdentifiersWithRename() {
     TableIdentifier invalidFrom = TableIdentifier.of(Namespace.of("l1", "l2"), "table1");
@@ -207,6 +214,49 @@ public class TestHiveCatalog extends CatalogTests<HiveCatalog> {
           .containsEntry(
               TableProperties.PARQUET_COMPRESSION,
               TableProperties.PARQUET_COMPRESSION_DEFAULT_SINCE_1_4_0);
+    } finally {
+      catalog.dropTable(tableIdent);
+    }
+  }
+
+  @Test
+  public void testUpperCaseCreateTable() {
+    Schema schema = getUpperCaseTestSchema();
+    PartitionSpec spec = PartitionSpec.builderFor(schema).bucket("data", 16).build();
+    TableIdentifier tableIdent = TableIdentifier.of(DB_NAME, "UPPER_NAME");
+    String location = temp.resolve("UPPER_NAME").toString();
+
+    try {
+      Table table =
+              catalog
+                      .buildTable(tableIdent, schema)
+                      .withPartitionSpec(spec)
+                      .withLocation(location)
+                      .withProperty("key1", "value1")
+                      .withProperty("key2", "value2")
+                      .create();
+      TableIdentifier lowerTableIdent = TableIdentifier.of(DB_NAME, "upper_name");
+      boolean tableExists = catalog.tableExists(lowerTableIdent);
+      assertThat(tableExists).isTrue();
+
+      assertThat(table.location()).isEqualTo(location);
+      assertThat(table.schema().columns()).hasSize(2);
+      assertThat(table.spec().fields()).hasSize(1);
+      assertThat(table.properties()).containsEntry("key1", "value1");
+      assertThat(table.properties()).containsEntry("key2", "value2");
+      // default Parquet compression is explicitly set for new tables
+      assertThat(table.properties())
+              .containsEntry(
+                      TableProperties.PARQUET_COMPRESSION,
+                      TableProperties.PARQUET_COMPRESSION_DEFAULT_SINCE_1_4_0);
+
+      Assertions.assertThatThrownBy(() -> catalog
+                      .buildTable(lowerTableIdent, schema)
+                      .withPartitionSpec(spec)
+                      .withLocation(location)
+                      .withProperty("key1", "value1")
+                      .withProperty("key2", "value2")
+                      .create()).isInstanceOf(AlreadyExistsException.class).hasMessage("Table already exists: hivedb.upper_name");
     } finally {
       catalog.dropTable(tableIdent);
     }
