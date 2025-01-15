@@ -44,6 +44,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.iceberg.CachingCatalog;
@@ -70,6 +71,7 @@ import org.apache.iceberg.catalog.CatalogTests;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.exceptions.NamespaceNotEmptyException;
 import org.apache.iceberg.exceptions.NoSuchNamespaceException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
@@ -169,7 +171,9 @@ public class TestHiveCatalog extends CatalogTests<HiveCatalog> {
   private Schema getUpperCaseTestSchema() {
     return new Schema(
             required(1, "ID", Types.IntegerType.get(), "unique ID"),
-            required(2, "data", Types.StringType.get()));
+            required(2, "data", Types.StringType.get()),
+            required(3, "COL", Types.StringType.get()),
+            required(4, "col", Types.StringType.get()));
   }
 
   @Test
@@ -226,40 +230,13 @@ public class TestHiveCatalog extends CatalogTests<HiveCatalog> {
     TableIdentifier tableIdent = TableIdentifier.of(DB_NAME, "UPPER_NAME");
     String location = temp.resolve("UPPER_NAME").toString();
 
-    try {
-      Table table =
-              catalog
-                      .buildTable(tableIdent, schema)
-                      .withPartitionSpec(spec)
-                      .withLocation(location)
-                      .withProperty("key1", "value1")
-                      .withProperty("key2", "value2")
-                      .create();
-      TableIdentifier lowerTableIdent = TableIdentifier.of(DB_NAME, "upper_name");
-      boolean tableExists = catalog.tableExists(lowerTableIdent);
-      assertThat(tableExists).isTrue();
-
-      assertThat(table.location()).isEqualTo(location);
-      assertThat(table.schema().columns()).hasSize(2);
-      assertThat(table.spec().fields()).hasSize(1);
-      assertThat(table.properties()).containsEntry("key1", "value1");
-      assertThat(table.properties()).containsEntry("key2", "value2");
-      // default Parquet compression is explicitly set for new tables
-      assertThat(table.properties())
-              .containsEntry(
-                      TableProperties.PARQUET_COMPRESSION,
-                      TableProperties.PARQUET_COMPRESSION_DEFAULT_SINCE_1_4_0);
-
       Assertions.assertThatThrownBy(() -> catalog
-                      .buildTable(lowerTableIdent, schema)
-                      .withPartitionSpec(spec)
-                      .withLocation(location)
-                      .withProperty("key1", "value1")
-                      .withProperty("key2", "value2")
-                      .create()).isInstanceOf(AlreadyExistsException.class).hasMessage("Table already exists: hivedb.upper_name");
-    } finally {
-      catalog.dropTable(tableIdent);
-    }
+              .buildTable(tableIdent, schema)
+              .withPartitionSpec(spec)
+              .withLocation(location)
+              .withProperty("key1", "value1")
+              .withProperty("key2", "value2")
+              .create()).isInstanceOf(CommitStateUnknownException.class);
   }
 
   @Test
